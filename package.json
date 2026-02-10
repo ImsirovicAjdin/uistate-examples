@@ -1,0 +1,27 @@
+{
+  "name": "@uistate/examples",
+  "version": "1.0.0",
+  "description": "Example applications and patterns for @uistate/core — eventState and cssState",
+  "type": "module",
+  "files": [
+    "eventState/",
+    "cssState/"
+  ],
+  "keywords": [
+    "uistate",
+    "examples",
+    "state-management",
+    "event-driven",
+    "css-state",
+    "tutorials"
+  ],
+  "author": "Ajdin Imsirovic",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ImsirovicAjdin/uistate-examples"
+  },
+  "peerDependencies": {
+    "@uistate/core": ">=5.0.0"
+  }
+}
