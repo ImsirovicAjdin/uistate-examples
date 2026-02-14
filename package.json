@@ -1,6 +1,6 @@
 {
   "name": "@uistate/examples",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Example applications and patterns for @uistate/core — eventState and cssState",
   "type": "module",
   "files": [
