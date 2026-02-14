@@ -1,5 +1,5 @@
 // store.js — singleton eventState store for counter app
-import { createEventState } from '../runtime/core/eventStateNew.js';
+import { createEventState } from '@uistate/core';
 
 const initial = {
   count: 0

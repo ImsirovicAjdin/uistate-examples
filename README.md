@@ -25,15 +25,26 @@ eventState/          # EventState examples
 cssState/            # CssState examples (coming soon)
 ```
 
-## Usage
+## Prerequisites
 
-Each example is a standalone HTML file that can be opened directly in the browser. Examples import `@uistate/core` via CDN or local reference.
-
-## Install
+This package requires [`@uistate/core`](https://www.npmjs.com/package/@uistate/core) as a **peer dependency** (v5.0.0+). Install both:
 
 ```bash
-npm install @uistate/examples
+npm install @uistate/examples @uistate/core
 ```
+
+## Usage
+
+Each example is a standalone HTML file. To run them locally:
+
+1. Install dependencies (this installs `@uistate/core` into `node_modules/`)
+2. Serve the package folder with any static HTTP server, e.g.:
+   ```bash
+   npx serve .
+   ```
+3. Open any example in your browser, e.g. `eventState/001-counter/index.html`
+
+Examples import `@uistate/core` via an [import map](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/script/type/importmap) that resolves to `node_modules/@uistate/core/`.
 
 ## License
 

@@ -4,7 +4,7 @@
  * Provides TDD-style testing with type extraction capabilities
  */
 
-import { createEventState } from '../runtime/core/eventStateNew.js';
+import { createEventState } from '@uistate/core';
 
 export function createEventTest(initialState = {}) {
   const store = createEventState(initialState);
