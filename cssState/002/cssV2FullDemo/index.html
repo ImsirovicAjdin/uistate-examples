@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>@uistate/css v2 — Full Demo</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; transition: background 0.3s, color 0.3s; }
+  code { font-size: 0.85em; background: rgba(128,128,128,0.15); padding: 0.1em 0.35em; border-radius: 3px; }
+  pre code { background: none; padding: 0; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <header class="header">
+    <h1 class="h1">@uistate/css v2</h1>
+    <p>Style Engine + Design Tokens + Typed CSS + Relational Constraints</p>
+  </header>
+
+  <!-- Section 1: Design System Tokens -->
+  <section class="section">
+    <h2 class="h2">1. Design System — Reactive Tokens</h2>
+    <p class="caption">Change a token, every bound style updates instantly.</p>
+    <div class="btn-row">
+      <button class="btn primary" onclick="swapTheme('default')">Default</button>
+      <button class="btn primary" onclick="swapTheme('ocean')">Ocean</button>
+      <button class="btn primary" onclick="swapTheme('forest')">Forest</button>
+      <button class="btn primary" onclick="swapTheme('sunset')">Sunset</button>
+    </div>
+    <div class="btn-row">
+      <label>Primary: <input type="color" id="pickPrimary" value="#3b82f6" oninput="ds.setToken('color.primary', this.value)"></label>
+      <label>Surface: <input type="color" id="pickSurface" value="#ffffff" oninput="ds.setToken('color.surface', this.value)"></label>
+      <label>Danger: <input type="color" id="pickDanger" value="#ef4444" oninput="ds.setToken('color.danger', this.value)"></label>
+    </div>
+  </section>
+
+  <!-- Section 2: Cards showing style engine + contrast -->
+  <section class="section">
+    <h2 class="h2">2. Style Engine + WCAG Contrast</h2>
+    <p class="caption">Card text color auto-adjusts for readability when background changes.</p>
+    <div class="card-grid">
+      <div class="card">
+        <h3 class="h3">Primary Card</h3>
+        <p class="small">Background bound to <code>color.primary</code>. Text auto-picks light/dark for 4.5:1 contrast.</p>
+      </div>
+      <div class="card-surface">
+        <h3 class="h3">Surface Card</h3>
+        <p class="small">Background bound to <code>color.surface</code>. Hover states from style engine paths.</p>
+      </div>
+      <div class="card-danger">
+        <h3 class="h3">Danger Card</h3>
+        <p class="small">Background bound to <code>color.danger</code>. Contrast enforced at AA level.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 3: Typed CSS -->
+  <section class="section">
+    <h2 class="h2">3. Typed CSS — Runtime Validation</h2>
+    <p class="caption">Try setting invalid values. Check the console for warnings.</p>
+    <div class="btn-row">
+      <button class="btn primary" onclick="testValid()">Set Valid Padding (1rem)</button>
+      <button class="btn danger" onclick="testInvalidPadding()">Set Invalid Padding (99rem)</button>
+      <button class="btn danger" onclick="testInvalidColor()">Set Invalid Color ('banana')</button>
+      <button class="btn danger" onclick="testInvalidEnum()">Set Invalid Display ('table')</button>
+    </div>
+    <pre class="log" id="typedLog"></pre>
+  </section>
+
+  <!-- Section 4: Relational CSS -->
+  <section class="section">
+    <h2 class="h2">4. Relational CSS — Modular Type Scale</h2>
+    <p class="caption">All font sizes scale proportionally from one base value.</p>
+    <div class="btn-row">
+      <button class="btn primary" onclick="setBaseFont('0.875rem')">Small (0.875rem)</button>
+      <button class="btn primary" onclick="setBaseFont('1rem')">Medium (1rem)</button>
+      <button class="btn primary" onclick="setBaseFont('1.25rem')">Large (1.25rem)</button>
+      <button class="btn primary" onclick="setBaseFont('1.5rem')">XL (1.5rem)</button>
+    </div>
+    <div class="type-demo">
+      <p class="h1">Heading 1 (2×)</p>
+      <p class="h2">Heading 2 (1.5×)</p>
+      <p class="h3">Heading 3 (1.25×)</p>
+      <p class="body">Body text (1×)</p>
+      <p class="small">Small text (0.875×)</p>
+    </div>
+  </section>
+
+  <!-- Section 5: Inspector -->
+  <section class="section">
+    <h2 class="h2">5. State Inspector</h2>
+    <p class="caption">Tokens, bindings, relations, and violations — all inspectable.</p>
+    <div class="btn-row">
+      <button class="btn primary" onclick="showInspector('tokens')">Tokens</button>
+      <button class="btn primary" onclick="showInspector('bindings')">Bindings</button>
+      <button class="btn primary" onclick="showInspector('relations')">Relations</button>
+      <button class="btn primary" onclick="showInspector('violations')">Violations</button>
+      <button class="btn primary" onclick="showInspector('schema')">Schema</button>
+    </div>
+    <pre class="log" id="inspector"></pre>
+  </section>
+</div>
+
+<script>
+// ============================================================
+// Inline eventState (from @uistate/core)
+// ============================================================
+function createEventState(initial = {}) {
+  const state = JSON.parse(JSON.stringify(initial));
+  const listeners = new Map();
+  return {
+    get(path) {
+      if (!path) return state;
+      let cur = state;
+      for (const p of path.split('.')) { if (cur == null) return undefined; cur = cur[p]; }
+      return cur;
+    },
+    set(path, value) {
+      if (!path) return value;
+      const parts = path.split('.'); const key = parts.pop(); let cur = state;
+      for (const p of parts) { if (!cur[p]) cur[p] = {}; cur = cur[p]; }
+      const oldValue = cur[key]; cur[key] = value;
+      const detail = { path, value, oldValue };
+      listeners.get(path)?.forEach(cb => cb(value, detail));
+      if (parts.length) {
+        let parent = '';
+        for (const p of parts) { parent = parent ? `${parent}.${p}` : p; listeners.get(`${parent}.*`)?.forEach(cb => cb(detail)); }
+      }
+      listeners.get('*')?.forEach(cb => cb(detail));
+      return value;
+    },
+    subscribe(path, handler) {
+      if (!listeners.has(path)) listeners.set(path, new Set());
+      listeners.get(path).add(handler);
+      return () => listeners.get(path)?.delete(handler);
+    },
+    destroy() { listeners.clear(); }
+  };
+}
+
+// ============================================================
+// Inline Style Engine
+// ============================================================
+const CSS_PROPERTIES = new Set(['accentColor','alignContent','alignItems','alignSelf','background','backgroundColor','backgroundImage','backgroundPosition','backgroundRepeat','backgroundSize','border','borderBottom','borderBottomColor','borderBottomLeftRadius','borderBottomRightRadius','borderBottomStyle','borderBottomWidth','borderCollapse','borderColor','borderLeft','borderLeftColor','borderLeftStyle','borderLeftWidth','borderRadius','borderRight','borderRightColor','borderRightStyle','borderRightWidth','borderSpacing','borderStyle','borderTop','borderTopColor','borderTopLeftRadius','borderTopRightRadius','borderTopStyle','borderTopWidth','borderWidth','bottom','boxShadow','boxSizing','caretColor','clear','clipPath','color','columnCount','columnGap','columnRule','columns','content','cursor','direction','display','fill','filter','flex','flexBasis','flexDirection','flexFlow','flexGrow','flexShrink','flexWrap','float','font','fontFamily','fontFeatureSettings','fontSize','fontStyle','fontVariant','fontWeight','gap','gridAutoColumns','gridAutoFlow','gridAutoRows','gridColumn','gridColumnEnd','gridColumnGap','gridColumnStart','gridGap','gridRow','gridRowEnd','gridRowGap','gridRowStart','gridTemplateAreas','gridTemplateColumns','gridTemplateRows','height','isolation','justifyContent','justifyItems','justifySelf','left','letterSpacing','lineHeight','listStyle','listStylePosition','listStyleType','margin','marginBottom','marginLeft','marginRight','marginTop','maxHeight','maxWidth','minHeight','minWidth','mixBlendMode','objectFit','objectPosition','opacity','order','outline','outlineColor','outlineOffset','outlineStyle','outlineWidth','overflow','overflowWrap','overflowX','overflowY','padding','paddingBottom','paddingLeft','paddingRight','paddingTop','perspective','placeContent','placeItems','placeSelf','pointerEvents','position','resize','right','rotate','rowGap','scale','scrollBehavior','scrollMargin','scrollPadding','stroke','strokeDasharray','strokeDashoffset','strokeLinecap','strokeLinejoin','strokeOpacity','strokeWidth','tableLayout','textAlign','textDecoration','textDecorationColor','textDecorationLine','textDecorationStyle','textIndent','textOverflow','textShadow','textTransform','top','transform','transformOrigin','transition','transitionDelay','transitionDuration','transitionProperty','transitionTimingFunction','userSelect','verticalAlign','visibility','whiteSpace','width','willChange','wordBreak','wordSpacing','writingMode','zIndex']);
+const PSEUDO_CLASSES = new Map([['hover',':hover'],['focus',':focus'],['active',':active'],['disabled',':disabled'],['visited',':visited'],['checked',':checked'],['empty',':empty'],['invalid',':invalid'],['valid',':valid'],['firstChild',':first-child'],['lastChild',':last-child'],['focusWithin',':focus-within'],['focusVisible',':focus-visible']]);
+const PSEUDO_ELEMENTS = new Map([['before','::before'],['after','::after'],['placeholder','::placeholder'],['selection','::selection']]);
+function camelToKebab(s) { return s.replace(/([A-Z])/g, '-$1').toLowerCase(); }
+
+function createStyleEngine(store, { namespace = 'css', id = 'uistate-css' } = {}) {
+  const el = document.createElement('style'); el.id = id; document.head.appendChild(el);
+  const sheet = el.sheet; const ruleMap = new Map();
+  function getOrCreate(sel) { if (!ruleMap.has(sel)) { const i = sheet.insertRule(`${sel} {}`, sheet.cssRules.length); ruleMap.set(sel, sheet.cssRules[i]); } return ruleMap.get(sel); }
+  function apply(sel, prop, val) { getOrCreate(sel).style.setProperty(camelToKebab(prop), val); }
+  function parse(fullPath) {
+    const path = fullPath.startsWith(namespace+'.') ? fullPath.slice(namespace.length+1) : fullPath;
+    const segs = path.split('.'); const prop = segs[segs.length-1];
+    if (!CSS_PROPERTIES.has(prop)) return null;
+    const parts = []; let pseudo = '';
+    for (let i = 0; i < segs.length-1; i++) {
+      const s = segs[i];
+      if (PSEUDO_CLASSES.has(s)) pseudo += PSEUDO_CLASSES.get(s);
+      else if (PSEUDO_ELEMENTS.has(s)) pseudo += PSEUDO_ELEMENTS.get(s);
+      else { if (pseudo) { parts[parts.length-1] += pseudo; pseudo = ''; } parts.push('.'+s); }
+    }
+    return { selector: (parts.length ? parts.join(' ') : ':root') + pseudo, prop };
+  }
+  function process(p, v) {
+    if (typeof v === 'object' && v !== null) { walk(p, v); return; }
+    const r = parse(p); if (r) apply(r.selector, r.prop, String(v));
+  }
+  function walk(prefix, obj) { for (const [k,v] of Object.entries(obj)) { const p = `${prefix}.${k}`; if (typeof v === 'object' && v !== null) walk(p,v); else process(p,v); } }
+  store.subscribe(`${namespace}.*`, ({ path, value }) => process(path, value));
+  return { apply, parse };
+}
+
+// ============================================================
+// Inline Design System
+// ============================================================
+function createDesignSystem(store, { tokens = {}, namespace = 'tokens' } = {}) {
+  const bindings = new Map(); const unsubs = new Map();
+  function setDeep(st, pre, obj) { if (typeof obj === 'object' && obj !== null && !Array.isArray(obj)) { for (const [k,v] of Object.entries(obj)) setDeep(st, `${pre}.${k}`, v); } else st.set(pre, obj); }
+  setDeep(store, namespace, tokens);
+  function full(tp) { return tp.startsWith(namespace+'.') ? tp : `${namespace}.${tp}`; }
+  function ensure(tp) {
+    if (unsubs.has(tp)) return;
+    unsubs.set(tp, store.subscribe(full(tp), (val) => { const t = bindings.get(tp); if (t) for (const sp of t) store.set(sp, val); }));
+  }
+  return {
+    bind(sp, tp) {
+      if (!bindings.has(tp)) bindings.set(tp, new Set());
+      bindings.get(tp).add(sp); ensure(tp);
+      const v = store.get(full(tp)); if (v !== undefined) store.set(sp, v);
+      return () => { bindings.get(tp)?.delete(sp); };
+    },
+    bindAll(map) { const u = []; for (const [s,t] of Object.entries(map)) u.push(this.bind(s,t)); return () => u.forEach(f=>f()); },
+    setToken(tp, v) { store.set(full(tp), v); },
+    setTokens(tree) { setDeep(store, namespace, tree); },
+    getToken(tp) { return store.get(full(tp)); },
+    getAllTokens() { return store.get(namespace); },
+    getBindings() { const r = {}; for (const [t,s] of bindings) r[t] = [...s]; return r; },
+    destroy() { for (const u of unsubs.values()) u(); unsubs.clear(); bindings.clear(); },
+  };
+}
+
+// ============================================================
+// Inline Typed CSS
+// ============================================================
+const COLOR_RE = /^(#([0-9a-f]{3,8})|rgb(a)?\(|hsl(a)?\(|transparent|currentColor|inherit|initial|unset|var\()/i;
+const COLOR_NAMES = new Set(['black','white','red','green','blue','yellow','orange','purple','pink','gray','grey','cyan','magenta','brown','olive','navy','teal','maroon','aqua','lime','silver','fuchsia']);
+const LENGTH_RE = /^(-?\d+(\.\d+)?)(px|rem|em|%|vh|vw|vmin|vmax|ch|ex|cm|mm|in|pt|pc)$/;
+const LEN_PX = { px:1, rem:16, em:16, pt:1.333, cm:37.795, mm:3.7795, 'in':96 };
+function lenToPx(v) { const m = String(v).match(LENGTH_RE); if (!m) return null; return parseFloat(m[1]) * (LEN_PX[m[3]]||0); }
+
+function createTypedCSS(store, schema = {}, { namespace = 'css', mode = 'warn', onViolation = null } = {}) {
+  store.set('schema', JSON.parse(JSON.stringify(schema)));
+  const violations = [];
+  function report(c, p, msg) {
+    const e = { component:c, property:p, message:msg, timestamp:Date.now() }; violations.push(e);
+    if (violations.length > 200) violations.shift();
+    const fmt = `[typed-css] ${c}.${p}: ${msg}`;
+    if (onViolation) onViolation(e); else if (mode==='warn') console.warn(fmt); else if (mode==='error') console.error(fmt);
+  }
+  const V = {
+    color(v) { const s = v.trim().toLowerCase(); return (COLOR_RE.test(s)||COLOR_NAMES.has(s)) ? null : `'${v}' is not a valid color.`; },
+    length(v, c) {
+      const parts = v.trim().split(/\s+/);
+      if (!parts.every(p => LENGTH_RE.test(p)||p==='0'||p==='auto'||p==='inherit'||/^var\(/.test(p))) return `'${v}' is not a valid length.`;
+      if (c.min||c.max) { const px = lenToPx(v); if (px!==null) { if (c.min) { const mp = lenToPx(c.min); if (mp!==null&&px<mp) return `'${v}' is below minimum '${c.min}'.`; } if (c.max) { const mp = lenToPx(c.max); if (mp!==null&&px>mp) return `'${v}' exceeds maximum '${c.max}'.`; } } }
+      return null;
+    },
+    enum(v, c) { return c.values?.includes(v) ? null : `'${v}' not allowed. Expected: ${c.values?.join(', ')}.`; },
+    shadow(v, c) { if (c.maxLayers && v.split(',').length > c.maxLayers) return `Shadow has ${v.split(',').length} layers, max ${c.maxLayers}.`; return null; },
+    string() { return null; },
+  };
+  const unsub = store.subscribe(`${namespace}.*`, ({ path, value }) => {
+    if (typeof value === 'object') return;
+    const rel = path.startsWith(namespace+'.') ? path.slice(namespace.length+1) : path;
+    const segs = rel.split('.'); if (segs.length < 2) return;
+    const comp = segs[0]; const cs = schema[comp]; if (!cs) return;
+    const prop = segs[segs.length-1]; const con = cs[prop];
+    if (!con) { report(comp, prop, `Property not in schema. Allowed: ${Object.keys(cs).join(', ')}.`); return; }
+    const vf = V[con.type]; if (!vf) return;
+    const err = vf(String(value), con); if (err) report(comp, prop, err);
+  });
+  return {
+    validate(c, p, v) { const cs = schema[c]; if (!cs) return {valid:true,error:null}; const con = cs[p]; if (!con) return {valid:false,error:`'${p}' not in schema.`}; const vf = V[con.type]; if (!vf) return {valid:true,error:null}; const e = vf(String(v),con); return {valid:!e,error:e}; },
+    defineComponent(c, s) { schema[c] = s; store.set(`schema.${c}`, JSON.parse(JSON.stringify(s))); },
+    getSchema(c) { return c ? store.get(`schema.${c}`) : store.get('schema'); },
+    getViolations(n=50) { return violations.slice(-n); },
+    clearViolations() { violations.length = 0; },
+    destroy() { unsub(); },
+  };
+}
+
+// ============================================================
+// Inline Relational CSS
+// ============================================================
+function hexToRgb(h) { h=h.replace('#',''); let r,g,b; if (h.length===3){r=parseInt(h[0]+h[0],16);g=parseInt(h[1]+h[1],16);b=parseInt(h[2]+h[2],16);} else if(h.length>=6){r=parseInt(h.substring(0,2),16);g=parseInt(h.substring(2,4),16);b=parseInt(h.substring(4,6),16);} else return null; return [r,g,b]; }
+function parseColor(v) { if (!v||typeof v!=='string') return null; v=v.trim(); if (v.startsWith('#')) return hexToRgb(v); const m=v.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/); if (m) return [+m[1],+m[2],+m[3]]; const n={white:[255,255,255],black:[0,0,0],red:[255,0,0],green:[0,128,0],blue:[0,0,255]}; return n[v.toLowerCase()]||null; }
+function relLum([r,g,b]) { const f=c=>{c/=255;return c<=0.03928?c/12.92:Math.pow((c+0.055)/1.055,2.4);}; return 0.2126*f(r)+0.7152*f(g)+0.0722*f(b); }
+function contrast(c1,c2) { const l1=relLum(c1),l2=relLum(c2); return (Math.max(l1,l2)+0.05)/(Math.min(l1,l2)+0.05); }
+function parseLen(v) { if (typeof v!=='string') return null; const m=v.trim().match(LENGTH_RE); return m?{value:parseFloat(m[1]),unit:m[3]}:null; }
+function fmtLen(n,u) { return `${Math.round(n*10000)/10000}${u}`; }
+
+function createRelationalCSS(store) {
+  const unsubs = []; const relations = [];
+  return {
+    derive(target, { ref, multiply=1, add=0 } = {}) {
+      function compute() { const s=store.get(ref); if (s==null) return; const p=parseLen(String(s)); if (p) store.set(target, fmtLen(p.value*multiply+add, p.unit)); else if (!isNaN(parseFloat(s))) store.set(target, String(parseFloat(s)*multiply+add)); }
+      compute(); unsubs.push(store.subscribe(ref, compute)); relations.push({type:'derive',target,source:ref,multiply,add});
+    },
+    scale(base, targets) {
+      const entries = Object.entries(targets);
+      function compute() { const s=store.get(base); if (s==null) return; const p=parseLen(String(s)); if (!p) return; for (const [t,f] of entries) store.set(t, fmtLen(p.value*f, p.unit)); }
+      compute(); unsubs.push(store.subscribe(base, compute)); relations.push({type:'scale',base,targets:{...targets}});
+    },
+    contrast(target, { against, light='#ffffff', dark='#1e293b', minRatio=4.5 } = {}) {
+      function compute() { const bg=store.get(against); if (!bg) return; const bgR=parseColor(String(bg)); if (!bgR) return; const lR=parseColor(light),dR=parseColor(dark); if (!lR||!dR) return; const lr=contrast(lR,bgR),dr=contrast(dR,bgR); if (lr>=minRatio&&dr>=minRatio) store.set(target,lr>=dr?light:dark); else if (lr>=minRatio) store.set(target,light); else if (dr>=minRatio) store.set(target,dark); else { store.set(target,lr>=dr?light:dark); console.warn(`[relational-css] contrast(${target}): best ratio ${Math.max(lr,dr).toFixed(2)}:1 < ${minRatio}:1`); } }
+      compute(); unsubs.push(store.subscribe(against, compute)); relations.push({type:'contrast',target,against,light,dark,minRatio});
+    },
+    clamp(target, { ref, min, max } = {}) {
+      const minP=parseLen(min),maxP=parseLen(max);
+      function compute() { const s=store.get(ref); if (s==null) return; const p=parseLen(String(s)); if (!p){store.set(target,s);return;} let v=p.value; if(minP&&p.unit===minP.unit) v=Math.max(v,minP.value); if(maxP&&p.unit===maxP.unit) v=Math.min(v,maxP.value); store.set(target,fmtLen(v,p.unit)); }
+      compute(); unsubs.push(store.subscribe(ref, compute)); relations.push({type:'clamp',target,ref,min,max});
+    },
+    getRelations() { return [...relations]; },
+    destroy() { unsubs.forEach(u=>u()); unsubs.length=0; relations.length=0; },
+  };
+}
+
+// ============================================================
+// BOOT — Wire everything together
+// ============================================================
+const store = createEventState();
+const engine = createStyleEngine(store);
+
+// ---- Design System ----
+const ds = createDesignSystem(store, {
+  tokens: {
+    color: { primary: '#3b82f6', danger: '#ef4444', surface: '#ffffff', text: '#1e293b', muted: '#64748b' },
+    spacing: { xs: '0.25rem', sm: '0.5rem', md: '1rem', lg: '1.5rem', xl: '2rem' },
+    radius: { sm: '0.25rem', md: '0.5rem', lg: '0.75rem' },
+    font: { base: '1rem' },
+    shadow: { sm: '0 1px 2px rgba(0,0,0,0.05)', md: '0 4px 6px rgba(0,0,0,0.1)', lg: '0 10px 15px rgba(0,0,0,0.15)' },
+  },
+});
+
+// ---- Relational CSS ----
+const rel = createRelationalCSS(store);
+
+// Modular type scale from tokens.font.base
+rel.scale('tokens.font.base', {
+  'css.h1.fontSize': 2.0,
+  'css.h2.fontSize': 1.5,
+  'css.h3.fontSize': 1.25,
+  'css.body.fontSize': 1,
+  'css.small.fontSize': 0.875,
+});
+
+// Header padding is 2x section padding
+rel.derive('css.header.paddingBottom', { ref: 'css.section.padding', multiply: 1.5 });
+
+// WCAG contrast enforcement on cards
+rel.contrast('css.card.color', { against: 'css.card.background', light: '#ffffff', dark: '#1e293b', minRatio: 4.5 });
+rel.contrast('css.card-surface.color', { against: 'css.card-surface.background', light: '#ffffff', dark: '#1e293b', minRatio: 4.5 });
+rel.contrast('css.card-danger.color', { against: 'css.card-danger.background', light: '#ffffff', dark: '#1e293b', minRatio: 4.5 });
+
+// ---- Typed CSS ----
+const typed = createTypedCSS(store, {
+  btn: {
+    background: { type: 'color' },
+    color: { type: 'color' },
+    padding: { type: 'length', min: '0.25rem', max: '3rem' },
+    borderRadius: { type: 'length' },
+    fontSize: { type: 'length', min: '0.75rem', max: '2rem' },
+    display: { type: 'enum', values: ['flex', 'inline-flex', 'block', 'inline-block', 'none'] },
+  },
+  card: {
+    background: { type: 'color' },
+    color: { type: 'color' },
+    padding: { type: 'length' },
+    borderRadius: { type: 'length' },
+    boxShadow: { type: 'shadow', maxLayers: 3 },
+  },
+}, {
+  onViolation(entry) {
+    const log = document.getElementById('typedLog');
+    const line = `⚠️ ${entry.component}.${entry.property}: ${entry.message}`;
+    log.textContent = line + '\n' + log.textContent;
+  }
+});
+
+// ---- Base styles via engine ----
+store.set('css.page', { maxWidth: '850px', margin: '0 auto', padding: '2rem' });
+store.set('css.header', { padding: '1.5rem 0', marginBottom: '1rem' });
+store.set('css.section', { marginBottom: '2rem', padding: '1rem' });
+store.set('css.caption', { marginBottom: '0.75rem', opacity: '0.7' });
+store.set('css.h1', { fontWeight: '700', marginBottom: '0.5rem' });
+store.set('css.h2', { fontWeight: '600', marginBottom: '0.5rem' });
+store.set('css.h3', { fontWeight: '600', marginBottom: '0.25rem' });
+store.set('css.body', { lineHeight: '1.6' });
+store.set('css.small', { lineHeight: '1.5' });
+
+// Button styles
+store.set('css.btn', { padding: '0.5rem 1rem', borderRadius: '0.5rem', border: '1px solid rgba(128,128,128,0.2)', cursor: 'pointer', transition: 'background 0.2s, transform 0.1s', display: 'inline-block', fontWeight: '500' });
+store.set('css.btn.active.transform', 'scale(0.97)');
+store.set('css.btn-row', { display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem', alignItems: 'center' });
+store.set('css.btn-row.label', { display: 'flex', gap: '0.35rem', alignItems: 'center', fontSize: '0.9rem' });
+
+// Card grid
+store.set('css.card-grid', { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' });
+
+// Card base styles
+const cardBase = { padding: '1.25rem', borderRadius: '0.75rem', transition: 'box-shadow 0.2s, transform 0.2s', cursor: 'pointer' };
+store.set('css.card', { ...cardBase, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' });
+store.set('css.card.hover.transform', 'translateY(-2px)');
+store.set('css.card.hover.boxShadow', '0 8px 20px rgba(0,0,0,0.15)');
+store.set('css.card-surface', { ...cardBase, boxShadow: '0 2px 8px rgba(0,0,0,0.08)' });
+store.set('css.card-surface.hover.transform', 'translateY(-2px)');
+store.set('css.card-danger', { ...cardBase, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' });
+store.set('css.card-danger.hover.transform', 'translateY(-2px)');
+
+// Log/pre styles
+store.set('css.log', { padding: '0.75rem', borderRadius: '0.5rem', fontSize: '0.8rem', overflow: 'auto', maxHeight: '200px', whiteSpace: 'pre-wrap', fontFamily: 'monospace', border: '1px solid rgba(128,128,128,0.2)' });
+
+// Type demo
+store.set('css.type-demo', { padding: '1rem', borderRadius: '0.5rem', border: '1px solid rgba(128,128,128,0.2)' });
+
+// ---- Bind tokens to styles ----
+// Page
+ds.bind('css.page.background', 'color.surface');
+ds.bind('css.page.color', 'color.text');
+// Primary button
+ds.bind('css.btn.primary.background', 'color.primary');
+ds.bind('css.btn.primary.color', 'color.surface');
+// Danger button
+ds.bind('css.btn.danger.background', 'color.danger');
+ds.bind('css.btn.danger.color', 'color.surface');
+// Cards bound to tokens
+ds.bind('css.card.background', 'color.primary');
+ds.bind('css.card-surface.background', 'color.surface');
+ds.bind('css.card-danger.background', 'color.danger');
+// Log
+ds.bind('css.log.background', 'color.surface');
+ds.bind('css.log.color', 'color.text');
+
+// ---- Theme presets ----
+const themePresets = {
+  default: { color: { primary: '#3b82f6', danger: '#ef4444', surface: '#ffffff', text: '#1e293b', muted: '#64748b' } },
+  ocean:   { color: { primary: '#0891b2', danger: '#f97316', surface: '#0c4a6e', text: '#e0f2fe', muted: '#7dd3fc' } },
+  forest:  { color: { primary: '#16a34a', danger: '#dc2626', surface: '#14532d', text: '#dcfce7', muted: '#86efac' } },
+  sunset:  { color: { primary: '#e11d48', danger: '#9333ea', surface: '#1c1917', text: '#fef2f2', muted: '#fda4af' } },
+};
+
+// ---- Expose to buttons ----
+window.ds = ds;
+window.typed = typed;
+window.rel = rel;
+window.store = store;
+
+window.swapTheme = function(name) {
+  ds.setTokens(themePresets[name]);
+  // Update color pickers
+  const t = themePresets[name].color;
+  document.getElementById('pickPrimary').value = t.primary;
+  document.getElementById('pickSurface').value = t.surface;
+  document.getElementById('pickDanger').value = t.danger;
+};
+
+window.setBaseFont = function(size) {
+  ds.setToken('font.base', size);
+};
+
+window.testValid = function() { store.set('css.btn.padding', '1rem'); };
+window.testInvalidPadding = function() { store.set('css.btn.padding', '99rem'); };
+window.testInvalidColor = function() { store.set('css.btn.background', 'banana'); };
+window.testInvalidEnum = function() { store.set('css.btn.display', 'table'); };
+
+window.showInspector = function(what) {
+  const el = document.getElementById('inspector');
+  switch (what) {
+    case 'tokens': el.textContent = JSON.stringify(ds.getAllTokens(), null, 2); break;
+    case 'bindings': el.textContent = JSON.stringify(ds.getBindings(), null, 2); break;
+    case 'relations': el.textContent = JSON.stringify(rel.getRelations(), null, 2); break;
+    case 'violations': el.textContent = JSON.stringify(typed.getViolations(), null, 2); break;
+    case 'schema': el.textContent = JSON.stringify(typed.getSchema(), null, 2); break;
+  }
+};
+</script>
+</body>
+</html>

@@ -9,6 +9,7 @@
  * - Selective subscriptions (only relevant subscribers fire)
  * - Wildcard subscriptions (e.g., 'user.*' catches all user changes)
  * - Global subscriptions (e.g., '*' catches all changes)
+ * - Atomic batching (batch/setMany — subscribers fire after all writes)
  * - Zero dependencies
  * - ~2KB minified
  *
@@ -20,7 +21,7 @@
  * @example
  * const store = createEventState({ count: 0, user: { name: 'Alice' } });
  *
- * // Subscribe to specific path (receives value directly)
+ * // Subscribe to specific path
  * const unsub = store.subscribe('count', (value) => {
  *   console.log('Count changed:', value);
  * });
@@ -41,6 +42,15 @@
  *   console.log(`State changed at ${path}:`, value);
  * });
  *
+ * // Batch multiple writes (subscribers fire once per path, after batch)
+ * store.batch(() => {
+ *   store.set('user.name', 'Charlie');
+ *   store.set('user.email', 'charlie@example.com');
+ * });
+ *
+ * // Or use setMany for the same effect
+ * store.setMany({ 'user.name': 'Charlie', 'user.email': 'charlie@example.com' });
+ *
  * // Cleanup
  * unsub();
  * store.destroy();
@@ -49,7 +59,61 @@
 export function createEventState(initial = {}) {
   const state = JSON.parse(JSON.stringify(initial));
   const listeners = new Map();
+  const asyncOps = new Map();
   let destroyed = false;
+
+  // Batching: buffer writes and flush once at the end
+  let batching = false;
+  const batchBuffer = new Map();
+
+  function writeAndNotify(path, value) {
+    const parts = path.split(".");
+    const key = parts.pop();
+    let cur = state;
+
+    for (const p of parts) {
+      if (!cur[p]) cur[p] = {};
+      cur = cur[p];
+    }
+
+    const oldValue = cur[key];
+    cur[key] = value;
+
+    if (!destroyed) {
+      const detail = { path, value, oldValue };
+
+      const exactListeners = listeners.get(path);
+      if (exactListeners) {
+        exactListeners.forEach(cb => cb(value, detail));
+      }
+
+      if (parts.length) {
+        let parent = "";
+        for (const p of parts) {
+          parent = parent ? `${parent}.${p}` : p;
+          const wildcardListeners = listeners.get(`${parent}.*`);
+          if (wildcardListeners) {
+            wildcardListeners.forEach(cb => cb(detail));
+          }
+        }
+      }
+
+      const globalListeners = listeners.get('*');
+      if (globalListeners) {
+        globalListeners.forEach(cb => cb(detail));
+      }
+    }
+
+    return value;
+  }
+
+  function flushBatch() {
+    const entries = Array.from(batchBuffer.entries());
+    batchBuffer.clear();
+    for (const [p, v] of entries) {
+      writeAndNotify(p, v);
+    }
+  }
 
   return {
     /**
@@ -60,7 +124,13 @@ export function createEventState(initial = {}) {
     get(path) {
       if (destroyed) throw new Error('Cannot get from destroyed store');
       if (!path) return state;
-      return path.split(".").reduce((obj, key) => obj?.[key], state);
+      const parts = path.split('.');
+      let cur = state;
+      for (const p of parts) {
+        if (cur == null) return undefined;
+        cur = cur[p];
+      }
+      return cur;
     },
 
     /**
@@ -73,51 +143,118 @@ export function createEventState(initial = {}) {
       if (destroyed) throw new Error('Cannot set on destroyed store');
       if (!path) return value;
 
-      const parts = path.split(".");
-      const key = parts.pop();
-      let cur = state;
-
-      // Navigate to parent object, creating nested objects as needed
-      for (const p of parts) {
-        if (!cur[p]) cur[p] = {};
-        cur = cur[p];
+      if (batching) {
+        batchBuffer.set(path, value);
+        return value;
       }
 
-      const oldValue = cur[key];
-      cur[key] = value;
+      return writeAndNotify(path, value);
+    },
 
-      if (!destroyed) {
-        const detail = { path, value, oldValue };
-
-        // Notify exact path subscribers (pass value directly for backwards compatibility)
-        const exactListeners = listeners.get(path);
-        if (exactListeners) {
-          exactListeners.forEach(cb => cb(value));
-        }
-
-        // Notify wildcard subscribers for all parent paths (pass detail object)
-        for (let i = 0; i < parts.length; i++) {
-          const parentPath = parts.slice(0, i + 1).join('.');
-          const wildcardListeners = listeners.get(`${parentPath}.*`);
-          if (wildcardListeners) {
-            wildcardListeners.forEach(cb => cb(detail));
-          }
-        }
-
-        // Notify global subscribers (pass detail object)
-        const globalListeners = listeners.get('*');
-        if (globalListeners) {
-          globalListeners.forEach(cb => cb(detail));
-        }
+    async setAsync(path, fetcher) {
+      if (destroyed) throw new Error('Cannot setAsync on destroyed store');
+      if (!path) throw new TypeError('setAsync requires a path');
+      if (typeof fetcher !== 'function') {
+        throw new TypeError('setAsync(path, fetcher) requires a function fetcher');
       }
 
-      return value;
+      if (asyncOps.has(path)) {
+        asyncOps.get(path).controller.abort();
+      }
+
+      const controller = new AbortController();
+      asyncOps.set(path, { controller });
+
+      try {
+        this.batch(() => {
+          this.set(`${path}.status`, 'loading');
+          this.set(`${path}.error`, null);
+        });
+
+        const data = await fetcher(controller.signal);
+
+        if (destroyed) throw new Error('Cannot setAsync on destroyed store');
+
+        this.batch(() => {
+          this.set(`${path}.data`, data);
+          this.set(`${path}.status`, 'success');
+        });
+        return data;
+      } catch (err) {
+        if (err?.name === 'AbortError') {
+          this.set(`${path}.status`, 'cancelled');
+          const cancelErr = new Error('Request cancelled');
+          cancelErr.name = 'AbortError';
+          throw cancelErr;
+        }
+
+        this.batch(() => {
+          this.set(`${path}.status`, 'error');
+          this.set(`${path}.error`, err?.message ?? String(err));
+        });
+        throw err;
+      } finally {
+        const op = asyncOps.get(path);
+        if (op?.controller === controller) {
+          asyncOps.delete(path);
+        }
+      }
+    },
+
+    cancel(path) {
+      if (destroyed) throw new Error('Cannot cancel on destroyed store');
+      if (!path) throw new TypeError('cancel requires a path');
+
+      if (asyncOps.has(path)) {
+        asyncOps.get(path).controller.abort();
+        asyncOps.delete(path);
+        this.set(`${path}.status`, 'cancelled');
+      }
+    },
+
+    /**
+     * Batch multiple set() calls. Subscribers fire once per unique path
+     * after the batch completes, not during. Supports nesting.
+     * @param {Function} fn - Function containing set() calls to batch
+     */
+    batch(fn) {
+      if (destroyed) throw new Error('Cannot batch on destroyed store');
+      if (typeof fn !== 'function') throw new TypeError('batch requires a function');
+      const wasBatching = batching;
+      batching = true;
+      try {
+        fn();
+      } finally {
+        batching = wasBatching;
+        if (!batching) flushBatch();
+      }
+    },
+
+    /**
+     * Set multiple paths atomically. Equivalent to batch(() => { set(a); set(b); ... }).
+     * Accepts a plain object, an array of [path, value] pairs, or a Map.
+     * @param {Object|Array|Map} entries - Paths and values to set
+     */
+    setMany(entries) {
+      if (destroyed) throw new Error('Cannot setMany on destroyed store');
+      if (!entries) return;
+      this.batch(() => {
+        if (Array.isArray(entries)) {
+          for (const [p, v] of entries) this.set(p, v);
+        } else if (entries instanceof Map) {
+          for (const [p, v] of entries.entries()) this.set(p, v);
+        } else if (typeof entries === 'object') {
+          for (const p of Object.keys(entries)) this.set(p, entries[p]);
+        }
+      });
     },
 
     /**
      * Subscribe to changes at path
      * @param {string} path - Path to subscribe to (supports wildcards: 'user.*', '*')
-     * @param {Function} handler - Callback function receiving { path, value, oldValue }
+     * @param {Function} handler - Callback function.
+     *   - Exact path subscriptions: (value, meta) => void
+     *   - Wildcard/global subscriptions: (meta) => void
      * @returns {Function} Unsubscribe function
      */
     subscribe(path, handler) {
@@ -140,6 +277,9 @@ export function createEventState(initial = {}) {
     destroy() {
       if (!destroyed) {
         destroyed = true;
+        batchBuffer.clear();
+        asyncOps.forEach(({ controller }) => controller.abort());
+        asyncOps.clear();
         listeners.clear();
       }
     }

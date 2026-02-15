@@ -5,7 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>001 Counter - EventState</title>
   <script type="importmap">
-    { "imports": { "@uistate/core": "../../node_modules/@uistate/core/index.js" } }
+    { "imports": {
+      "@uistate/core": "../../node_modules/@uistate/core/index.js",
+      "@uistate/aliases": "../../node_modules/@uistate/aliases/index.js"
+    }}
   </script>
 </head>
 <body>
@@ -14,17 +17,18 @@
 
   <script type="module">
     import { createEventState } from '@uistate/core';
+    import { $ } from '@uistate/aliases';
 
     // Create store
     const store = createEventState({ count: 0 });
 
     // Subscribe to count changes
     store.subscribe('count', ( value ) => {
-      document.getElementById('count').textContent = value;
+      $('count').textContent = value;
     });
 
     // Increment on button click
-    document.getElementById('increment').onclick = () => {
+    $('increment').onclick = () => {
       const current = store.get('count');
       store.set('count', current + 1);
     };

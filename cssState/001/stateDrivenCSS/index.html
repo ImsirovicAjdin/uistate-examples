@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>State-Driven CSS — @uistate/css demo</title>
+<style>
+  /* Base reset — everything else comes from state */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; min-height: 100vh; transition: background 0.3s, color 0.3s; }
+</style>
+</head>
+<body>
+
+<div class="page">
+  <header class="header">
+    <h1>State-Driven CSS</h1>
+    <p>Every style on this page lives in an eventState store. No Tailwind. No CSS-in-JS. Just paths.</p>
+  </header>
+
+  <section class="controls">
+    <h2>1. Theme Swap (one <code>store.set</code> call)</h2>
+    <div class="btn-row">
+      <button onclick="setTheme('light')">Light Theme</button>
+      <button onclick="setTheme('dark')">Dark Theme</button>
+      <button onclick="setTheme('ocean')">Ocean Theme</button>
+    </div>
+
+    <h2>2. Live Token Edit</h2>
+    <p>Change the primary color token — every component using it updates:</p>
+    <div class="btn-row">
+      <input type="color" id="primaryPicker" value="#3b82f6" oninput="setToken(this.value)">
+      <span id="tokenLabel">#3b82f6</span>
+    </div>
+
+    <h2>3. State-Conditional Styles</h2>
+    <p>Toggle user plan — styles react to application state, not CSS classes:</p>
+    <div class="btn-row">
+      <button onclick="setPlan('free')">Free Plan</button>
+      <button onclick="setPlan('pro')">Pro Plan</button>
+    </div>
+  </section>
+
+  <section class="cards">
+    <div class="card">
+      <h3>Card A</h3>
+      <p>Hover me. My hover color comes from <code>css.card.hover.background</code>.</p>
+    </div>
+    <div class="card">
+      <h3>Card B</h3>
+      <p>My background, padding, border-radius — all state paths.</p>
+    </div>
+    <div class="card premium">
+      <h3>Premium Feature</h3>
+      <p>Only visible on Pro plan. Controlled by <code>css.premium.display</code>.</p>
+    </div>
+  </section>
+
+  <section class="controls">
+    <h2>4. Style Inspector</h2>
+    <p>The entire stylesheet as a state tree:</p>
+    <pre id="inspector"></pre>
+  </section>
+
+  <section class="controls">
+    <h2>5. Change Log (wildcard subscription on <code>css.*</code>)</h2>
+    <pre id="changelog"></pre>
+  </section>
+</div>
+
+<script>
+// ============================================================
+// 1. Inline eventState (from @uistate/core — ~80 LOC)
+// ============================================================
+function createEventState(initial = {}) {
+  const state = JSON.parse(JSON.stringify(initial));
+  const listeners = new Map();
+  let destroyed = false;
+
+  return {
+    get(path) {
+      if (!path) return state;
+      let cur = state;
+      for (const p of path.split('.')) {
+        if (cur == null) return undefined;
+        cur = cur[p];
+      }
+      return cur;
+    },
+    set(path, value) {
+      if (!path) return value;
+      const parts = path.split('.');
+      const key = parts.pop();
+      let cur = state;
+      for (const p of parts) {
+        if (!cur[p]) cur[p] = {};
+        cur = cur[p];
+      }
+      const oldValue = cur[key];
+      cur[key] = value;
+      const detail = { path, value, oldValue };
+      listeners.get(path)?.forEach(cb => cb(value, detail));
+      if (parts.length) {
+        let parent = '';
+        for (const p of parts) {
+          parent = parent ? `${parent}.${p}` : p;
+          listeners.get(`${parent}.*`)?.forEach(cb => cb(detail));
+        }
+      }
+      listeners.get('*')?.forEach(cb => cb(detail));
+      return value;
+    },
+    subscribe(path, handler) {
+      if (!listeners.has(path)) listeners.set(path, new Set());
+      listeners.get(path).add(handler);
+      return () => listeners.get(path)?.delete(handler);
+    },
+    destroy() { destroyed = true; listeners.clear(); }
+  };
+}
+
+// ============================================================
+// 2. Path-to-CSS compiler (~90 LOC — the new thing)
+// ============================================================
+const CSS_PROPERTIES = new Set([
+  'background','color','padding','margin','border','borderRadius',
+  'boxShadow','fontSize','fontWeight','fontFamily','lineHeight',
+  'letterSpacing','textAlign','textDecoration','textTransform',
+  'display','position','top','right','bottom','left','zIndex',
+  'width','height','minWidth','maxWidth','minHeight','maxHeight',
+  'overflow','opacity','cursor','transition','transform',
+  'gap','flexDirection','alignItems','justifyContent','flexWrap',
+  'gridTemplateColumns','gridTemplateRows','gridGap',
+  'borderColor','borderWidth','borderStyle','outline',
+  'backgroundImage','backgroundSize','backgroundPosition',
+  'whiteSpace','wordBreak','overflowWrap',
+]);
+
+const PSEUDO_CLASSES = new Set([
+  'hover','focus','active','disabled','visited',
+  'firstChild','lastChild','nthChild',
+]);
+
+function camelToKebab(s) {
+  return s.replace(/([A-Z])/g, '-$1').toLowerCase();
+}
+
+function createStyleEngine(store, { namespace = 'css' } = {}) {
+  const sheet = document.createElement('style');
+  sheet.id = 'uistate-css';
+  document.head.appendChild(sheet);
+  const ruleMap = new Map(); // selector string → { index, rule }
+
+  function upsertRule(selector, prop, value) {
+    const key = selector;
+    if (!ruleMap.has(key)) {
+      const idx = sheet.sheet.insertRule(`${selector} {}`, sheet.sheet.cssRules.length);
+      ruleMap.set(key, { index: idx, rule: sheet.sheet.cssRules[idx] });
+    }
+    ruleMap.get(key).rule.style.setProperty(camelToKebab(prop), value);
+  }
+
+  function pathToCSS(fullPath, value) {
+    // Strip namespace prefix
+    const path = fullPath.startsWith(namespace + '.')
+      ? fullPath.slice(namespace.length + 1)
+      : fullPath;
+
+    const segments = path.split('.');
+    const prop = segments[segments.length - 1];
+
+    // Last segment must be a known CSS property
+    if (!CSS_PROPERTIES.has(prop)) return;
+
+    // Build selector and pseudo from remaining segments
+    const selectorParts = [];
+    let pseudo = '';
+
+    for (let i = 0; i < segments.length - 1; i++) {
+      const seg = segments[i];
+      if (PSEUDO_CLASSES.has(seg)) {
+        pseudo = ':' + seg;
+      } else {
+        selectorParts.push('.' + seg);
+      }
+    }
+
+    const selector = (selectorParts.length ? selectorParts.join('') : ':root') + pseudo;
+    upsertRule(selector, prop, value);
+  }
+
+  // Subscribe to all changes under the namespace
+  store.subscribe(`${namespace}.*`, ({ path, value }) => {
+    if (typeof value === 'string' || typeof value === 'number') {
+      pathToCSS(path, String(value));
+    } else if (typeof value === 'object' && value !== null) {
+      // Subtree set — walk all leaves
+      walkLeaves(path, value);
+    }
+  });
+
+  function walkLeaves(prefix, obj) {
+    for (const [k, v] of Object.entries(obj)) {
+      const p = `${prefix}.${k}`;
+      if (typeof v === 'object' && v !== null) {
+        walkLeaves(p, v);
+      } else {
+        pathToCSS(p, String(v));
+      }
+    }
+  }
+
+  return { sheet, upsertRule, pathToCSS };
+}
+
+// ============================================================
+// 3. Themes as plain objects (state subtrees)
+// ============================================================
+const themes = {
+  light: {
+    page: {
+      background: '#f8fafc',
+      color: '#1e293b',
+      padding: '2rem',
+      maxWidth: '800px',
+      margin: '0 auto',
+    },
+    header: {
+      padding: '2rem 0',
+      borderBottom: '1px solid #e2e8f0',
+      marginBottom: '2rem',
+    },
+    card: {
+      background: '#ffffff',
+      color: '#1e293b',
+      padding: '1.5rem',
+      borderRadius: '0.75rem',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+      transition: 'box-shadow 0.2s, transform 0.2s',
+      cursor: 'pointer',
+      hover: {
+        boxShadow: '0 8px 25px rgba(0,0,0,0.12)',
+        transform: 'translateY(-2px)',
+      }
+    },
+    cards: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+      gap: '1rem',
+      marginBottom: '2rem',
+    },
+    controls: {
+      marginBottom: '2rem',
+    },
+  },
+  dark: {
+    page: {
+      background: '#0f172a',
+      color: '#e2e8f0',
+      padding: '2rem',
+      maxWidth: '800px',
+      margin: '0 auto',
+    },
+    header: {
+      padding: '2rem 0',
+      borderBottom: '1px solid #334155',
+      marginBottom: '2rem',
+    },
+    card: {
+      background: '#1e293b',
+      color: '#e2e8f0',
+      padding: '1.5rem',
+      borderRadius: '0.75rem',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+      transition: 'box-shadow 0.2s, transform 0.2s',
+      cursor: 'pointer',
+      hover: {
+        boxShadow: '0 8px 25px rgba(0,0,0,0.5)',
+        transform: 'translateY(-2px)',
+      }
+    },
+    cards: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+      gap: '1rem',
+      marginBottom: '2rem',
+    },
+    controls: {
+      marginBottom: '2rem',
+    },
+  },
+  ocean: {
+    page: {
+      background: '#0c4a6e',
+      color: '#e0f2fe',
+      padding: '2rem',
+      maxWidth: '800px',
+      margin: '0 auto',
+    },
+    header: {
+      padding: '2rem 0',
+      borderBottom: '1px solid #0369a1',
+      marginBottom: '2rem',
+    },
+    card: {
+      background: '#075985',
+      color: '#e0f2fe',
+      padding: '1.5rem',
+      borderRadius: '0.75rem',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+      transition: 'box-shadow 0.2s, transform 0.2s',
+      cursor: 'pointer',
+      hover: {
+        boxShadow: '0 8px 25px rgba(0,0,0,0.35)',
+        transform: 'translateY(-2px)',
+      }
+    },
+    cards: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+      gap: '1rem',
+      marginBottom: '2rem',
+    },
+    controls: {
+      marginBottom: '2rem',
+    },
+  },
+};
+
+// ============================================================
+// 4. Boot
+// ============================================================
+const store = createEventState();
+const engine = createStyleEngine(store);
+
+// Shared button/input styles (set individually)
+store.set('css.controls.h2.fontSize', '1.1rem');
+store.set('css.controls.h2.marginBottom', '0.5rem');
+store.set('css.controls.h2.marginTop', '1rem');
+store.set('css.controls.p.marginBottom', '0.5rem');
+store.set('css.controls.p.fontSize', '0.9rem');
+store.set('css.controls.p.opacity', '0.8');
+
+// btn-row layout
+const btnRowBase = {
+  display: 'flex',
+  gap: '0.5rem',
+  alignItems: 'center',
+  flexWrap: 'wrap',
+  marginBottom: '1rem',
+};
+store.set('css.btn-row', btnRowBase);
+
+// Button styles
+store.set('css.btn-row.button.padding', '0.5rem 1rem');
+store.set('css.btn-row.button.borderRadius', '0.5rem');
+store.set('css.btn-row.button.border', '1px solid rgba(128,128,128,0.3)');
+store.set('css.btn-row.button.cursor', 'pointer');
+store.set('css.btn-row.button.fontSize', '0.9rem');
+store.set('css.btn-row.button.background', 'rgba(128,128,128,0.15)');
+store.set('css.btn-row.button.color', 'inherit');
+store.set('css.btn-row.button.transition', 'background 0.2s');
+store.set('css.btn-row.button.hover.background', 'rgba(128,128,128,0.3)');
+
+// Inspector styles
+store.set('css.controls.pre.background', 'rgba(0,0,0,0.15)');
+store.set('css.controls.pre.padding', '1rem');
+store.set('css.controls.pre.borderRadius', '0.5rem');
+store.set('css.controls.pre.fontSize', '0.8rem');
+store.set('css.controls.pre.overflow', 'auto');
+store.set('css.controls.pre.maxHeight', '300px');
+store.set('css.controls.pre.whiteSpace', 'pre-wrap');
+
+// Premium: hidden by default
+store.set('css.premium.display', 'none');
+
+// Apply light theme
+function applyTheme(name) {
+  const t = themes[name];
+  for (const [component, styles] of Object.entries(t)) {
+    store.set(`css.${component}`, styles);
+  }
+}
+applyTheme('light');
+
+// ============================================================
+// 5. User actions
+// ============================================================
+let changeLog = [];
+
+// Wildcard subscription — log all style changes
+store.subscribe('css.*', ({ path, value }) => {
+  if (typeof value === 'string' || typeof value === 'number') {
+    const entry = `${path} = ${value}`;
+    changeLog.unshift(entry);
+    if (changeLog.length > 30) changeLog.length = 30;
+    document.getElementById('changelog').textContent = changeLog.join('\n');
+  }
+});
+
+function updateInspector() {
+  const css = store.get('css');
+  document.getElementById('inspector').textContent = JSON.stringify(css, null, 2);
+}
+
+// Subscribe to any css change to refresh inspector
+store.subscribe('css.*', () => requestAnimationFrame(updateInspector));
+updateInspector();
+
+window.setTheme = function(name) {
+  applyTheme(name);
+};
+
+window.setToken = function(hex) {
+  document.getElementById('tokenLabel').textContent = hex;
+  // Change all card backgrounds to this color
+  store.set('css.card.background', hex);
+  // Also tint button hover
+  store.set('css.btn-row.button.hover.background', hex + '44');
+};
+
+window.setPlan = function(plan) {
+  if (plan === 'pro') {
+    store.set('css.premium.display', 'block');
+  } else {
+    store.set('css.premium.display', 'none');
+  }
+};
+</script>
+</body>
+</html>

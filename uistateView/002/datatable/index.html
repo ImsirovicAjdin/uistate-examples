@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>@uistate/view: DataTable Demo</title>
+  <script type="importmap">
+    {
+      "imports": {
+        "@uistate/core": "../../../node_modules/@uistate/core/index.js",
+        "@uistate/view/resolve": "../../../../uistate-view/resolve.js",
+        "@uistate/view/project": "../../../../uistate-view/project.js"
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="index.css">
+</head>
+<body>
+  <div id="app"></div>
+
+  <script type="module">
+    import { createEventState } from '@uistate/core';
+    import { flatten } from '@uistate/view/resolve';
+    import { mount } from '@uistate/view/project';
+
+    // 1. Data
+    const store = createEventState({
+      sortBy: 'name',
+      sortDir: 'asc',
+      rows: [
+        { name: 'Alice',   role: 'Engineer',  age: 32 },
+        { name: 'Bob',     role: 'Designer',  age: 28 },
+        { name: 'Charlie', role: 'Manager',   age: 45 },
+        { name: 'Diana',   role: 'Engineer',  age: 29 },
+        { name: 'Eve',     role: 'Designer',  age: 37 },
+        { name: 'Frank',   role: 'Manager',   age: 51 },
+      ],
+      sorted: []
+    });
+
+    // Derived: sort rows whenever sortBy/sortDir/rows change
+    function applySort() {
+      const rows = store.get('rows') || [];
+      const col = store.get('sortBy');
+      const dir = store.get('sortDir');
+      const sorted = [...rows].sort((a, b) => {
+        const va = a[col], vb = b[col];
+        if (typeof va === 'number') return dir === 'asc' ? va - vb : vb - va;
+        return dir === 'asc'
+          ? String(va).localeCompare(String(vb))
+          : String(vb).localeCompare(String(va));
+      });
+      store.set('sorted', sorted);
+    }
+
+    applySort();
+    store.subscribe('sortBy', applySort);
+    store.subscribe('sortDir', applySort);
+    store.subscribe('rows', applySort);
+
+    // 2. View
+    flatten({
+      tag: 'div',
+      class: 'datatable',
+      children: [
+        { tag: 'h1', text: 'Team Directory' },
+        { tag: 'p', class: 'subtitle', text: '{rows.length} members · click a column to sort' },
+        {
+          tag: 'table',
+          children: [
+            {
+              tag: 'thead',
+              children: [{
+                tag: 'tr',
+                children: [
+                  { tag: 'th', text: 'Name ↕', onClick: 'sortByCol(name)' },
+                  { tag: 'th', text: 'Role ↕', onClick: 'sortByCol(role)' },
+                  { tag: 'th', text: 'Age ↕',  onClick: 'sortByCol(age)' }
+                ]
+              }]
+            },
+            {
+              tag: 'tbody',
+              forEach: 'sorted',
+              as: 'row',
+              template: {
+                tag: 'tr',
+                children: [
+                  { tag: 'td', text: 'row.name' },
+                  { tag: 'td', text: 'row.role' },
+                  { tag: 'td', text: 'row.age' }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }, store, 'view');
+
+    // 3. Handlers
+    const handlers = {
+      sortByCol(col) {
+        if (!col || typeof col !== 'string') return;
+        const current = store.get('sortBy');
+        if (current === col) {
+          store.set('sortDir', store.get('sortDir') === 'asc' ? 'desc' : 'asc');
+        } else {
+          store.set('sortBy', col);
+          store.set('sortDir', 'asc');
+        }
+      }
+    };
+
+    // 4. Mount
+    mount(store, 'view', document.getElementById('app'), handlers);
+  </script>
+</body>
+</html>

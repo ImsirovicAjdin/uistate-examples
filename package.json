@@ -1,11 +1,17 @@
 {
   "name": "@uistate/examples",
-  "version": "1.0.1",
-  "description": "Example applications and patterns for @uistate/core — eventState and cssState",
+  "version": "1.0.2",
+  "description": "Example applications and patterns for @uistate/core: eventState and cssState",
   "type": "module",
+  "scripts": {
+    "postinstall": "node self-test.js",
+    "test": "node tests/examples.test.js",
+    "self-test": "node self-test.js"
+  },
   "files": [
     "eventState/",
-    "cssState/"
+    "cssState/",
+    "self-test.js"
   ],
   "keywords": [
     "uistate",
@@ -23,5 +29,8 @@
   },
   "peerDependencies": {
     "@uistate/core": ">=5.0.0"
+  },
+  "dependencies": {
+    "@uistate/aliases": "^1.0.0"
   }
 }

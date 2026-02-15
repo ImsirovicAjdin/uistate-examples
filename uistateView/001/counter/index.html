@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>@uistate/view: Increment Demo</title>
+  <script type="importmap">
+    {
+      "imports": {
+        "@uistate/core": "../../../node_modules/@uistate/core/index.js",
+        "@uistate/view/resolve": "../../../../uistate-view/resolve.js",
+        "@uistate/view/project": "../../../../uistate-view/project.js"
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="index.css">
+</head>
+<body>
+  <div id="app"></div>
+
+  <script type="module">
+    import { createEventState } from '@uistate/core';
+    import { flatten } from '@uistate/view/resolve';
+    import { mount } from '@uistate/view/project';
+
+    // 1. Data
+    const store = createEventState({ count: 0 });
+
+    // 2. View
+    flatten({
+      tag: 'div',
+      class: 'counter',
+      children: [
+        { tag: 'h1', text: '{count}' },
+        { tag: 'button', text: '+', onClick: 'increment' }
+      ]
+    }, store, 'view');
+
+    // 3. Handlers
+    const handlers = {
+      increment() {
+        store.set('count', store.get('count') + 1);
+      }
+    };
+
+    // 4. Mount
+    mount(store, 'view', document.getElementById('app'), handlers);
+  </script>
+</body>
+</html>

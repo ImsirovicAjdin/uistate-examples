@@ -46,6 +46,27 @@ Each example is a standalone HTML file. To run them locally:
 
 Examples import `@uistate/core` via an [import map](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/script/type/importmap) that resolves to `node_modules/@uistate/core/`.
 
+## Testing
+
+Two-layer testing architecture:
+
+**`self-test.js`** — Zero-dependency self-test (40 assertions). Runs automatically on `npm install` via `postinstall`. Verifies that all 11 example directories and their `index.html` files exist, then exercises the core state pattern from each example (counter, input binding, computed state, conditional toggle, list rendering, form validation, undo/redo, side effects, decoupled components, async patterns).
+
+```bash
+node self-test.js
+```
+
+**`tests/examples.test.js`** — Integration tests via `@uistate/event-test` (22 tests). Tests the state patterns from examples 001–011 using `createEventTest` and `runTests`.
+
+```bash
+npm test
+```
+
+| Suite | Assertions | Dependencies |
+|-------|-----------|-------------|
+| `self-test.js` | 40 | `@uistate/core` only |
+| `tests/examples.test.js` | 22 | `@uistate/event-test`, `@uistate/core` |
+
 ## License
 
 MIT

@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>@uistate/view: View-as-State Demo</title>
+  <script type="importmap">
+    {
+      "imports": {
+        "@uistate/core": "../../../node_modules/@uistate/core/index.js",
+        "@uistate/view/resolve": "../../../../uistate-view/resolve.js",
+        "@uistate/view/project": "../../../../uistate-view/project.js"
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="index.css">
+</head>
+<body>
+  <header>
+    <h1>@uistate/view: View-as-State</h1>
+    <p>The UI is not a function of state. The UI <strong>is</strong> state. Data + view in one store. DOMless testing. Surgical updates.</p>
+  </header>
+
+  <div class="layout">
+    <!-- Left: Live App -->
+    <div class="panel">
+      <h2>Live App (projected from store)</h2>
+      <div id="app"></div>
+    </div>
+
+    <!-- Right: State Inspector -->
+    <div class="panel">
+      <div class="tabs">
+        <button class="tab active" data-tab="data">Data State</button>
+        <button class="tab" data-tab="view">View State</button>
+        <button class="tab" data-tab="ssr">SSR Output</button>
+      </div>
+      <div id="dataView" class="state-inspector"></div>
+      <div id="viewView" class="state-inspector" style="display:none;"></div>
+      <div id="ssrView" class="ssr-output" style="display:none;"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { createEventState } from '@uistate/core';
+    import { normalize, flatten, resolveTree, serialize, resetIdCounter } from '@uistate/view/resolve';
+    import { mount } from '@uistate/view/project';
+
+    // == 1. Create the store with data ==================================
+
+    const store = createEventState({
+      todos: [
+        { id: 1, text: 'Learn EventState', done: true },
+        { id: 2, text: 'Build @uistate/view', done: true },
+        { id: 3, text: 'Ship it', done: false }
+      ],
+      inputText: '',
+      nextId: 4
+    });
+
+    // == 2. Define the view as a tree spec ==============================
+
+    flatten({
+      tag: 'div',
+      class: 'todo-app',
+      children: [
+        { tag: 'h2', text: 'Todo ({todos.length})' },
+        {
+          tag: 'div',
+          class: 'input-row',
+          children: [
+            { tag: 'input', type: 'text', placeholder: 'Add a todo...', bind: 'inputText', onEnter: 'addTodo' },
+            { tag: 'button', text: 'Add', onClick: 'addTodo' }
+          ]
+        },
+        {
+          tag: 'ul',
+          class: 'todo-list',
+          forEach: 'todos',
+          as: 'todo',
+          template: {
+            tag: 'li',
+            classIf: { done: 'todo.done' },
+            children: [
+              { tag: 'button', class: 'toggle', text: '\u2713', onClick: 'toggleTodo(todo.id)' },
+              { tag: 'span', text: 'todo.text', onDblClick: 'editTodo(todo.id)' },
+              { tag: 'button', text: '✕', onClick: 'deleteTodo(todo.id)' }
+            ]
+          }
+        },
+        {
+          tag: 'div',
+          class: 'stats',
+          children: [
+            { tag: 'span', text: 'Total: <strong>{todos.length}</strong>' },
+            { tag: 'span', text: 'Done: <strong>{todos.filter(t => t.done).length}</strong>' }
+          ]
+        }
+      ]
+    }, store, 'view');
+
+    // == 3. Define intent handlers ======================================
+
+    const handlers = {
+      addTodo() {
+        const text = store.get('inputText');
+        if (!text || !text.trim()) return;
+        const todos = store.get('todos') || [];
+        const id = store.get('nextId');
+        store.set('todos', [...todos, { id, text: text.trim(), done: false }]);
+        store.set('nextId', id + 1);
+        store.set('inputText', '');
+      },
+      toggleTodo(id) {
+        const todos = store.get('todos') || [];
+        store.set('todos', todos.map(t => t.id === id ? { ...t, done: !t.done } : t));
+      },
+      deleteTodo(id) {
+        const todos = store.get('todos') || [];
+        store.set('todos', todos.filter(t => t.id !== id));
+      },
+      editTodo(id, e) {
+        const span = e.target;
+        const li = span.closest('li');
+        if (!li || li.querySelector('.edit-input')) return;
+
+        const input = document.createElement('input');
+        input.className = 'edit-input';
+        input.value = span.textContent;
+        span.replaceWith(input);
+        input.focus();
+
+        let saved = false;
+        function save() {
+          if (saved) return;
+          saved = true;
+          const text = input.value.trim();
+          if (text) {
+            const todos = store.get('todos') || [];
+            store.set('todos', todos.map(t => t.id === id ? { ...t, text } : t));
+          }
+        }
+        input.addEventListener('blur', save);
+        input.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter') { ev.preventDefault(); save(); }
+          if (ev.key === 'Escape') { saved = true; store.set('todos', store.get('todos')); }
+        });
+      }
+    };
+
+    // == 4. Mount (project view state → DOM) ============================
+
+    const container = document.getElementById('app');
+    const cleanup = mount(store, 'view', container, handlers);
+
+    // == 5. State inspector ============================================─
+
+    const dataView = document.getElementById('dataView');
+    const viewView = document.getElementById('viewView');
+    const ssrView = document.getElementById('ssrView');
+
+    function syntaxHighlight(json) {
+      return json
+        .replace(/(".*?")\s*:/g, '<span class="state-key">$1</span>:')
+        .replace(/: (".*?")/g, ': <span class="state-string">$1</span>')
+        .replace(/: (\d+)/g, ': <span class="state-number">$1</span>')
+        .replace(/: (true|false)/g, ': <span class="state-bool">$1</span>')
+        .replace(/: (null)/g, ': <span class="state-null">$1</span>')
+        .replace(/([{}[\]])/g, '<span class="state-bracket">$1</span>');
+    }
+
+    function updateInspector() {
+      // Data state
+      const data = {
+        todos: store.get('todos'),
+        inputText: store.get('inputText'),
+        nextId: store.get('nextId')
+      };
+      dataView.innerHTML = syntaxHighlight(JSON.stringify(data, null, 2));
+
+      // View state
+      const viewState = {
+        rootId: store.get('view.rootId'),
+        nodes: store.get('view.nodes')
+      };
+      viewView.innerHTML = syntaxHighlight(JSON.stringify(viewState, null, 2));
+
+      // SSR
+      try {
+        const nodes = store.get('view.nodes');
+        const rootId = store.get('view.rootId');
+        if (nodes && rootId) {
+          const resolved = resolveTree(nodes, rootId, (p) => store.get(p));
+          ssrView.textContent = serialize(resolved);
+        }
+      } catch (e) {
+        ssrView.textContent = 'Error: ' + e.message;
+      }
+    }
+
+    updateInspector();
+    store.subscribe('*', () => setTimeout(updateInspector, 10));
+
+    // == Tabs ==
+
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        const which = tab.dataset.tab;
+        dataView.style.display = which === 'data' ? '' : 'none';
+        viewView.style.display = which === 'view' ? '' : 'none';
+        ssrView.style.display = which === 'ssr' ? '' : 'none';
+      });
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,124 @@
+body {
+  font-family: system-ui, sans-serif;
+  background: #0f172a;
+  color: #e2e8f0;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  min-height: 100vh;
+  margin: 0;
+  padding: 3rem 1rem;
+}
+
+.quotes-app {
+  width: 100%;
+  max-width: 560px;
+}
+
+.quotes-app h1 {
+  color: #38bdf8;
+  font-size: 1.6rem;
+  margin: 0 0 0.25rem;
+}
+
+.subtitle {
+  color: #64748b;
+  font-size: 0.8rem;
+  margin: 0 0 1.5rem;
+}
+
+.card {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.quote-text {
+  font-size: 1.15rem;
+  line-height: 1.6;
+  color: #f1f5f9;
+  margin: 0 0 0.5rem;
+  font-style: italic;
+}
+
+.quote-text::before { content: '\201C'; }
+.quote-text::after { content: '\201D'; }
+
+.quote-author {
+  color: #38bdf8;
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin: 0 0 1rem;
+}
+
+.quote-author:not(:empty)::before {
+  content: '— ';
+  color: #64748b;
+}
+
+.message {
+  color: #94a3b8;
+  font-size: 0.85rem;
+  margin: 0 0 1rem;
+  min-height: 1.2em;
+}
+
+.card button {
+  align-self: flex-start;
+  font-size: 0.9rem;
+  padding: 0.6rem 1.5rem;
+  background: #38bdf8;
+  color: #0f172a;
+  border: none;
+  border-radius: 8px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.card button:hover {
+  background: #7dd3fc;
+}
+
+.quotes-app h2 {
+  color: #94a3b8;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 0.75rem;
+}
+
+.history {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.history li {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.hist-quote {
+  color: #cbd5e1;
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.hist-author {
+  color: #38bdf8;
+  font-size: 0.8rem;
+  font-weight: 600;
+}

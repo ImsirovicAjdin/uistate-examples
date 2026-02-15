@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>@uistate/view: Quotes Fetcher</title>
+  <script type="importmap">
+    {
+      "imports": {
+        "@uistate/core": "../../../node_modules/@uistate/core/index.js",
+        "@uistate/core/queryClient": "../../../node_modules/@uistate/core/queryClient.js",
+        "@uistate/view/resolve": "../../../../uistate-view/resolve.js",
+        "@uistate/view/project": "../../../../uistate-view/project.js"
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="index.css">
+</head>
+<body>
+  <div id="app"></div>
+
+  <script type="module">
+    import { createEventState } from '@uistate/core';
+    import { createQueryClient } from '@uistate/core/queryClient';
+    import { flatten } from '@uistate/view/resolve';
+    import { mount } from '@uistate/view/project';
+
+    // 1. Store + QueryClient
+    const store = createEventState({
+      quote: '',
+      author: '',
+      history: [],
+      message: 'Click the button to fetch a quote'
+    });
+
+    const qc = createQueryClient(store);
+
+    // Fetch and store a quote
+    async function fetchQuote() {
+      store.set('message', 'Fetching...');
+      try {
+        const data = await qc.query('quote', async (signal) => {
+          const res = await fetch('https://dummyjson.com/quotes/random', { signal });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
+        });
+        store.set('quote', data.quote);
+        store.set('author', data.author);
+        store.set('message', '');
+        // Prepend to history
+        const history = store.get('history') || [];
+        store.set('history', [{ quote: data.quote, author: data.author }, ...history].slice(0, 10));
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          store.set('message', 'Error: ' + err.message);
+        }
+      }
+    }
+
+    // 2. View
+    flatten({
+      tag: 'div',
+      class: 'quotes-app',
+      children: [
+        { tag: 'h1', text: '💬 Quote Fetcher' },
+        { tag: 'p', class: 'subtitle', text: 'Powered by setAsync + QueryClient' },
+        {
+          tag: 'div',
+          class: 'card',
+          children: [
+            { tag: 'p', class: 'quote-text', text: '{quote}' },
+            { tag: 'p', class: 'quote-author', text: '{author}' },
+            { tag: 'p', class: 'message', text: '{message}' },
+            { tag: 'button', text: 'New Quote', onClick: 'fetchQuote' }
+          ]
+        },
+        { tag: 'h2', text: 'History ({history.length})' },
+        {
+          tag: 'ul',
+          class: 'history',
+          forEach: 'history',
+          as: 'item',
+          template: {
+            tag: 'li',
+            children: [
+              { tag: 'span', class: 'hist-quote', text: 'item.quote' },
+              { tag: 'span', class: 'hist-author', text: 'item.author' }
+            ]
+          }
+        }
+      ]
+    }, store, 'view');
+
+    // 3. Handlers
+    const handlers = {
+      fetchQuote() {
+        fetchQuote();
+      }
+    };
+
+    // 4. Mount
+    mount(store, 'view', document.getElementById('app'), handlers);
+
+    // Fetch one on load
+    fetchQuote();
+  </script>
+</body>
+</html>
